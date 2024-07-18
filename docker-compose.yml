@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  distributed-chat-service:
+    build: .
+    ports:
+      - "50051"
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+    #      resources:
+    #        limits:
+    #          cpus: '2'      # Limit to 2 CPU cores
+    #          memory: '4g'   # Limit to 4GB of memory
+    environment:
+      - GOMAXPROCS=14
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - distributed-chat-service
+
+  rabbitmq:
+    image: 'rabbitmq:3.13-management-alpine'
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    deploy:
+      mode: replicated
+      replicas: 1
+    volumes:
+      - ./db-data/rabbitmq/:/var/lib/rabbitmq
+# hey -n 100000 -c 200 -m POST -d "test payload" http://localhost/process
+
+#  ghz --insecure \
+#  --proto ./grpc-user/user.proto \
+#  --call users.PostDataService.Process \
+#-d '{"name": "Chinmay anand"}' \
+#  -c 300 \
+#  -n 1000000 \
+#  localhost:80
