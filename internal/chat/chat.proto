@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package chat;
+
+option go_package = "chat-app/internal/chat";
+
+service ChatService {
+  rpc Chat(stream ChatMessage) returns (stream ChatMessage) {}
+}
+
+message ChatMessage {
+  string user_id = 1;
+  string content = 2;
+  string room_id = 3;
+}
