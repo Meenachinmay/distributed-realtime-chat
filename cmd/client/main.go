@@ -17,7 +17,7 @@ func main() {
 	userID := fmt.Sprintf("user_%d", os.Getpid())
 	roomID := "FUJI123"
 
-	chatClient, err := client.NewChatClient(serverAddr)
+	chatClient, err := client.NewChatClient(serverAddr, 10)
 	if err != nil {
 		log.Fatalf("Failed to create chat client: %v", err)
 	}

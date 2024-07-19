@@ -2,6 +2,7 @@ package server
 
 import (
 	"distributed-realtime-chat/internal/chat"
+	"distributed-realtime-chat/pkg/utils"
 	"log"
 	"sync"
 
@@ -11,14 +12,18 @@ import (
 
 type ChatServer struct {
 	chat.UnimplementedChatServiceServer
-	mu      sync.RWMutex
-	clients map[string]map[string]chat.ChatService_ChatServer
+	mu         sync.RWMutex
+	clients    map[string]map[string]chat.ChatService_ChatServer
+	workerPool *utils.WorkerPool
 }
 
-func NewChatServer() *ChatServer {
-	return &ChatServer{
-		clients: make(map[string]map[string]chat.ChatService_ChatServer),
+func NewChatServer(workerCount int) *ChatServer {
+	s := &ChatServer{
+		clients:    make(map[string]map[string]chat.ChatService_ChatServer),
+		workerPool: utils.NewWorkerPool(workerCount),
 	}
+	s.workerPool.Start()
+	return s
 }
 
 func (s *ChatServer) Chat(stream chat.ChatService_ChatServer) error {
@@ -68,10 +73,18 @@ func (s *ChatServer) broadcastMessage(msg *chat.ChatMessage, roomID string) {
 
 	for userID, stream := range s.clients[roomID] {
 		if userID != msg.UserId {
-			err := stream.Send(msg)
-			if err != nil {
-				log.Printf("Error sending message to user %s: %v", userID, err)
-			}
+			userID := userID
+			stream := stream
+			s.workerPool.Submit(func() {
+				err := stream.Send(msg)
+				if err != nil {
+					log.Printf("Error sending message to user %s: %v", userID, err)
+				}
+			})
 		}
 	}
+}
+
+func (s *ChatServer) Stop() {
+	s.workerPool.Stop()
 }

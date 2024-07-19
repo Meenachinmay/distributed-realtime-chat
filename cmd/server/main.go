@@ -3,10 +3,12 @@ package main
 import (
 	"distributed-realtime-chat/internal/chat"
 	"distributed-realtime-chat/internal/server"
+	"google.golang.org/grpc"
 	"log"
 	"net"
-
-	"google.golang.org/grpc"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
@@ -16,10 +18,22 @@ func main() {
 	}
 
 	s := grpc.NewServer()
-	chat.RegisterChatServiceServer(s, server.NewChatServer())
+	chatServer := server.NewChatServer(100) // Use 100 workers
+	chat.RegisterChatServiceServer(s, chatServer)
 
-	log.Println("Starting gRPC server on :50051")
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("Failed to serve: %v", err)
-	}
+	go func() {
+		log.Println("Starting gRPC server on :50051")
+		if err := s.Serve(lis); err != nil {
+			log.Fatalf("Failed to serve: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	<-sigChan
+
+	log.Println("Shutting down...")
+	s.GracefulStop()
+	chatServer.Stop()
 }
