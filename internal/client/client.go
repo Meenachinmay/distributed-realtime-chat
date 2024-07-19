@@ -8,7 +8,9 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"io"
 	"log"
+	"math/rand"
 	"sync"
+	"time"
 )
 
 type ChatClient struct {
@@ -30,23 +32,32 @@ func NewChatClient(serverAddr string, poolSize int) (*ChatClient, error) {
 }
 
 func (c *ChatClient) Connect(ctx context.Context) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	backoffDuration := 100 * time.Millisecond
+	maxBackoff := 5 * time.Second
 
-	conn, err := c.pool.Get(ctx)
-	if err != nil {
-		return err
+	for {
+		conn, err := c.pool.Get(ctx)
+		if err == nil {
+			c.client = chat.NewChatServiceClient(conn)
+			stream, err := c.client.Chat(ctx)
+			if err == nil {
+				c.stream = stream
+				return nil
+			}
+			c.pool.Put(conn)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoffDuration):
+			// Increase backoff duration exponentially with some jitter
+			backoffDuration = time.Duration(float64(backoffDuration) * (1.5 + rand.Float64()*0.5))
+			if backoffDuration > maxBackoff {
+				backoffDuration = maxBackoff
+			}
+		}
 	}
-
-	c.client = chat.NewChatServiceClient(conn)
-	stream, err := c.client.Chat(ctx)
-	if err != nil {
-		c.pool.Put(conn)
-		return err
-	}
-
-	c.stream = stream
-	return nil
 }
 
 func (c *ChatClient) SendMessage(msg *chat.ChatMessage) error {
