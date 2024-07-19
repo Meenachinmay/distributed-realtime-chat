@@ -14,10 +14,10 @@ import (
 )
 
 var (
-	numClients  = flag.Int("clients", 10000, "Number of clients to simulate")
+	numClients  = flag.Int("clients", 20000, "Number of clients to simulate")
 	serverAddr  = flag.String("server", "localhost:50051", "Server address")
 	roomID      = flag.String("room", "FUJI123", "Chat room ID")
-	duration    = flag.Duration("duration", 5*time.Minute, "Duration of the load test")
+	duration    = flag.Duration("duration", 3*time.Minute, "Duration of the load test")
 	msgInterval = flag.Duration("interval", 100*time.Millisecond, "Interval between messages for each client")
 	poolSize    = flag.Int("pool", 1000, "Connection pool size")
 )
@@ -35,7 +35,7 @@ func main() {
 
 	var connectionErrors int64
 
-	clientIncrement := *numClients / 10
+	clientIncrement := *numClients / 20
 	for currentClients := clientIncrement; currentClients <= *numClients; currentClients += clientIncrement {
 		for i := currentClients - clientIncrement + 1; i <= currentClients; i++ {
 			wg.Add(1)
@@ -97,7 +97,7 @@ func main() {
 			}(i)
 			time.Sleep(time.Millisecond)
 		}
-		time.Sleep(5 * time.Second)
+		time.Sleep(3 * time.Second)
 		log.Printf("Connected clients: %d, Connection errors: %d", atomic.LoadInt32(&connectedClients), atomic.LoadInt64(&connectionErrors))
 
 	}

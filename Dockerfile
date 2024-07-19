@@ -5,7 +5,7 @@ WORKDIR /app
 
 COPY . .
 
-RUN go build -o main ./server/main.go
+RUN go build -o main ./cmd/server/main.go
 
 # Run stage
 FROM alpine:latest
