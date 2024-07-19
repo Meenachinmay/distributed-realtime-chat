@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 )
@@ -28,40 +29,33 @@ func (p *ConnPool) Get(ctx context.Context) (*grpc.ClientConn, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if len(p.conns) > 0 {
-		conn := p.conns[len(p.conns)-1]
-		p.conns = p.conns[:len(p.conns)-1]
-		p.available--
-		return conn, nil
-	}
-
-	if p.available > 0 {
-		conn, err := p.factory()
-		if err != nil {
-			return nil, err
-		}
-		p.available--
-		return conn, nil
-	}
-
-	// Wait for a connection to become available
 	for {
+		if len(p.conns) > 0 {
+			conn := p.conns[len(p.conns)-1]
+			p.conns = p.conns[:len(p.conns)-1]
+			p.available--
+			return conn, nil
+		}
+
+		if p.available > 0 {
+			conn, err := p.factory()
+			if err != nil {
+				return nil, err
+			}
+			p.available--
+			return conn, nil
+		}
+
+		timer := time.NewTimer(100 * time.Millisecond)
 		p.mu.Unlock()
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			p.mu.Lock()
 			return nil, ctx.Err()
-		default:
+		case <-timer.C:
 			p.mu.Lock()
-			if len(p.conns) > 0 {
-				conn := p.conns[len(p.conns)-1]
-				p.conns = p.conns[:len(p.conns)-1]
-				p.available--
-				return conn, nil
-			}
-			p.mu.Unlock()
 		}
-		p.mu.Lock()
 	}
 }
 

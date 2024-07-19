@@ -23,7 +23,7 @@ type ChatClient struct {
 
 func NewChatClient(serverAddr string, poolSize int) (*ChatClient, error) {
 	pool := utils.NewConnPool(func() (*grpc.ClientConn, error) {
-		return grpc.NewClient(serverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.Dial(serverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}, poolSize)
 
 	return &ChatClient{
@@ -51,7 +51,6 @@ func (c *ChatClient) Connect(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(backoffDuration):
-			// Increase backoff duration exponentially with some jitter
 			backoffDuration = time.Duration(float64(backoffDuration) * (1.5 + rand.Float64()*0.5))
 			if backoffDuration > maxBackoff {
 				backoffDuration = maxBackoff
@@ -78,6 +77,16 @@ func (c *ChatClient) ReceiveMessages(msgChan chan<- *chat.ChatMessage) {
 		}
 		msgChan <- msg
 	}
+}
+
+func (c *ChatClient) SendMessageBatch(messages []*chat.ChatMessage) error {
+	for _, msg := range messages {
+		err := c.stream.Send(msg)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *ChatClient) Close() {

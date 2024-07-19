@@ -7,6 +7,7 @@ import (
 	"google.golang.org/grpc/status"
 	"log"
 	"sync"
+	"time"
 )
 
 type ChatServer struct {
@@ -15,6 +16,13 @@ type ChatServer struct {
 	clients       map[string]map[string]*clientInfo
 	workerPool    *utils.WorkerPool
 	broadcastChan chan broadcastJob
+	config        ServerConfig
+}
+
+type ServerConfig struct {
+	WorkerCount   int
+	BatchInterval time.Duration
+	BatchSize     int
 }
 
 type broadcastJob struct {
@@ -22,46 +30,63 @@ type broadcastJob struct {
 	roomID string
 }
 
+type MessageBatch struct {
+	Messages []*chat.ChatMessage
+	RoomID   string
+}
+
 type clientInfo struct {
 	stream chat.ChatService_ChatServer
 	done   chan struct{}
 }
 
-func NewChatServer(workerCount int) *ChatServer {
+var messagePool = sync.Pool{
+	New: func() interface{} {
+		return &chat.ChatMessage{}
+	},
+}
+
+func NewChatServer(config ServerConfig) *ChatServer {
 	s := &ChatServer{
 		clients:       make(map[string]map[string]*clientInfo),
-		workerPool:    utils.NewWorkerPool(workerCount),
+		workerPool:    utils.NewWorkerPool(config.WorkerCount),
 		broadcastChan: make(chan broadcastJob, 1000000),
+		config:        config,
 	}
 	s.workerPool.Start()
-	for i := 0; i < workerCount; i++ {
-		go s.broadcastWorker()
-	}
+	go s.batchAndBroadcast()
 	return s
 }
 
-func (s *ChatServer) broadcastWorker() {
-	for job := range s.broadcastChan {
-		s.doBroadcastMessage(job.msg, job.roomID)
+func (s *ChatServer) batchAndBroadcast() {
+	batch := make(map[string][]*chat.ChatMessage)
+	ticker := time.NewTicker(s.config.BatchInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case job := <-s.broadcastChan:
+			batch[job.roomID] = append(batch[job.roomID], job.msg)
+			if len(batch[job.roomID]) >= s.config.BatchSize {
+				s.doBroadcastBatch(batch[job.roomID], job.roomID)
+				batch[job.roomID] = batch[job.roomID][:0]
+			}
+		case <-ticker.C:
+			for roomID, messages := range batch {
+				if len(messages) > 0 {
+					s.doBroadcastBatch(messages, roomID)
+					batch[roomID] = batch[roomID][:0]
+				}
+			}
+		}
 	}
 }
 
-func (s *ChatServer) broadcastMessage(msg *chat.ChatMessage, roomID string) {
-	select {
-	case s.broadcastChan <- broadcastJob{msg: msg, roomID: roomID}:
-	default:
-		// If the channel is full, process the message immediately
-		s.doBroadcastMessage(msg, roomID)
-	}
-}
-
-func (s *ChatServer) doBroadcastMessage(msg *chat.ChatMessage, roomID string) {
+func (s *ChatServer) doBroadcastBatch(messages []*chat.ChatMessage, roomID string) {
 	s.mu.RLock()
 	clients := make([]*clientInfo, 0, len(s.clients[roomID]))
-	for userID, client := range s.clients[roomID] {
-		if userID != msg.UserId {
-			clients = append(clients, client)
-		}
+	for _, client := range s.clients[roomID] {
+		clients = append(clients, client)
 	}
 	s.mu.RUnlock()
 
@@ -72,9 +97,12 @@ func (s *ChatServer) doBroadcastMessage(msg *chat.ChatMessage, roomID string) {
 			case <-client.done:
 				return
 			default:
-				err := client.stream.Send(msg)
-				if err != nil {
-					log.Printf("Error sending message: %v", err)
+				for _, msg := range messages {
+					err := client.stream.Send(msg)
+					if err != nil {
+						log.Printf("Error sending message: %v", err)
+						return
+					}
 				}
 			}
 		})
@@ -101,6 +129,10 @@ func (s *ChatServer) Chat(stream chat.ChatService_ChatServer) error {
 
 		s.broadcastMessage(msg, roomID)
 	}
+}
+
+func (s *ChatServer) broadcastMessage(msg *chat.ChatMessage, roomID string) {
+	s.broadcastChan <- broadcastJob{msg: msg, roomID: roomID}
 }
 
 func (s *ChatServer) addClient(userID, roomID string, stream chat.ChatService_ChatServer, done chan struct{}) {

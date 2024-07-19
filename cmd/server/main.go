@@ -7,6 +7,8 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"log"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
@@ -27,6 +29,11 @@ func main() {
 
 	// Increase the number of operating system threads
 	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	// Start pprof server
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
@@ -52,7 +59,11 @@ func main() {
 	}
 
 	s := grpc.NewServer(opts...)
-	chatServer := server.NewChatServer(runtime.NumCPU() * 4) // Use 100 workers
+	chatServer := server.NewChatServer(server.ServerConfig{
+		WorkerCount:   runtime.NumCPU() * 4,
+		BatchInterval: 100 * time.Millisecond,
+		BatchSize:     100,
+	})
 	chat.RegisterChatServiceServer(s, chatServer)
 
 	go func() {

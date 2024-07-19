@@ -20,6 +20,7 @@ var (
 	duration    = flag.Duration("duration", 3*time.Minute, "Duration of the load test")
 	msgInterval = flag.Duration("interval", 100*time.Millisecond, "Interval between messages for each client")
 	poolSize    = flag.Int("pool", 1000, "Connection pool size")
+	batchSize   = flag.Int("batch", 10, "Number of messages to batch before sending")
 )
 
 func main() {
@@ -32,8 +33,6 @@ func main() {
 	var messagesSent int64
 	var errors int64
 	var connectedClients int32
-
-	var connectionErrors int64
 
 	clientIncrement := *numClients / 20
 	for currentClients := clientIncrement; currentClients <= *numClients; currentClients += clientIncrement {
@@ -75,22 +74,29 @@ func main() {
 				ticker := time.NewTicker(*msgInterval)
 				defer ticker.Stop()
 
+				messageBatch := make([]*chat.ChatMessage, 0, *batchSize)
+
 				for {
 					select {
 					case <-ctx.Done():
 						return
 					case <-ticker.C:
 						msg := fmt.Sprintf("Message from %s: %d", userID, rand.Intn(1000))
-						err := chatClient.SendMessage(&chat.ChatMessage{
+						messageBatch = append(messageBatch, &chat.ChatMessage{
 							UserId:  userID,
 							Content: msg,
 							RoomId:  *roomID,
 						})
-						if err != nil {
-							log.Printf("Failed to send message for client %d: %v", clientID, err)
-							atomic.AddInt64(&errors, 1)
-						} else {
-							atomic.AddInt64(&messagesSent, 1)
+
+						if len(messageBatch) >= *batchSize {
+							err := chatClient.SendMessageBatch(messageBatch)
+							if err != nil {
+								log.Printf("Failed to send message batch for client %d: %v", clientID, err)
+								atomic.AddInt64(&errors, 1)
+							} else {
+								atomic.AddInt64(&messagesSent, int64(len(messageBatch)))
+							}
+							messageBatch = messageBatch[:0]
 						}
 					}
 				}
@@ -98,8 +104,7 @@ func main() {
 			time.Sleep(time.Millisecond)
 		}
 		time.Sleep(3 * time.Second)
-		log.Printf("Connected clients: %d, Connection errors: %d", atomic.LoadInt32(&connectedClients), atomic.LoadInt64(&connectionErrors))
-
+		log.Printf("Connected clients: %d", atomic.LoadInt32(&connectedClients))
 	}
 
 	// Start a goroutine to periodically print statistics

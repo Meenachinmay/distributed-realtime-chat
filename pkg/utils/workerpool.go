@@ -16,7 +16,7 @@ type WorkerPool struct {
 func NewWorkerPool(workerCount int) *WorkerPool {
 	return &WorkerPool{
 		workerCount: workerCount,
-		jobQueue:    make(chan Job, workerCount),
+		jobQueue:    make(chan Job, workerCount*100), // Increased buffer size
 		stop:        make(chan struct{}),
 	}
 }
@@ -24,17 +24,19 @@ func NewWorkerPool(workerCount int) *WorkerPool {
 func (wp *WorkerPool) Start() {
 	for i := 0; i < wp.workerCount; i++ {
 		wp.wg.Add(1)
-		go func() {
-			defer wp.wg.Done()
-			for {
-				select {
-				case job := <-wp.jobQueue:
-					job()
-				case <-wp.stop:
-					return
-				}
-			}
-		}()
+		go wp.worker()
+	}
+}
+
+func (wp *WorkerPool) worker() {
+	defer wp.wg.Done()
+	for {
+		select {
+		case job := <-wp.jobQueue:
+			job()
+		case <-wp.stop:
+			return
+		}
 	}
 }
 

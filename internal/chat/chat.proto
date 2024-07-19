@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package chat;
 
+import "gogoproto/gogo.proto";
+
 option go_package = "chat-app/internal/chat";
 
 service ChatService {
@@ -9,7 +11,7 @@ service ChatService {
 }
 
 message ChatMessage {
-  string user_id = 1;
-  string content = 2;
-  string room_id = 3;
+  string user_id = 1 [(gogoproto.nullable) = false];
+  string content = 2 [(gogoproto.nullable) = false];
+  string room_id = 3 [(gogoproto.nullable) = false];
 }
